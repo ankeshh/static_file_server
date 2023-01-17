@@ -14,6 +14,7 @@ async fn main(){
             .long("port")
             .value_name("PORT-NUMBER")
             .takes_value(true)
+            .required(false)
             .help("Sets the port number"),
         )
         .arg(
@@ -26,17 +27,18 @@ async fn main(){
         )
         .get_matches();
     
-    let mut file_server_address = String::from("127.0.0.1:");
+    let mut file_server_address = String::from("127.0.0.1:8000");
     let mut file_name = String::from("index.html");
 
     if let Some(i) = matches.value_of("port"){
-        file_server_address.push_str(i);
+        let offset = file_server_address.find('8').unwrap_or(file_server_address.len());
+        file_server_address.replace_range(offset.., i);
     }
     if let Some(j) = matches.value_of("file"){
         file_name.replace_range(.., j);
     }
 
-    //Starting server
+    // Starting server
     println!("Static file server is running on address {}", file_server_address);
 
     //bind
