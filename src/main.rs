@@ -1,9 +1,17 @@
-use std::fs;
-use tokio::{net::{TcpListener, TcpStream}, io::{AsyncReadExt, AsyncWriteExt}};
 use clap::{Arg, App};
+use std::net::SocketAddr;
+use hyper::server::conn::http1;
+use tokio::net::TcpListener;
+use bytes::Bytes;
+use http_body_util::Full;
+use hyper::service::service_fn;
+use hyper::{Request, Response, Result, StatusCode};
+
+static INDEX: &str = "./";
+static NOTFOUND: &[u8] = b"Not Found";
 
 #[tokio::main]
-async fn main(){
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let matches = App::new("Static File Server")
         .version("1.0")
         .author("Ankesh")
@@ -17,53 +25,55 @@ async fn main(){
             .required(false)
             .help("Sets the port number"),
         )
-        .arg(
-            Arg::new("file")
-            .short('f')
-            .long("file")
-            .value_name("FILE-NAME")
-            .takes_value(true)
-            .help("File to be servered")
-        )
         .get_matches();
     
-    let mut file_server_address = String::from("127.0.0.1:8000");
-    let mut file_name = String::from("index.html");
+    let mut file_port = String::from("8000");
 
     if let Some(i) = matches.value_of("port"){
-        let offset = file_server_address.find('8').unwrap_or(file_server_address.len());
-        file_server_address.replace_range(offset.., i);
-    }
-    if let Some(j) = matches.value_of("file"){
-        file_name.replace_range(.., j);
+        file_port.replace_range(.., i);
     }
 
     // Starting server
-    println!("Static file server is running on address {}", file_server_address);
+    println!("Static file server is running on address {}", file_port);
 
     //bind
-    let listener = TcpListener::bind(file_server_address).await.unwrap();
+    let addr = SocketAddr::from(([127,0,0,1], file_port.parse::<u16>().unwrap()));
+    let listener = TcpListener::bind(addr).await.unwrap();
     loop{
-        let file = file_name.clone();
         let (stream, _) = listener.accept().await.unwrap();
-        tokio::spawn(async move{
-            handle_connection(stream, &file).await;
+        tokio::task::spawn(async move{
+            if let Err(err) = 
+                http1::Builder::new().serve_connection(stream, service_fn(handle_connection)).await {
+                        eprintln!("Error serving connection: {:?}", err);
+                    }
         });
     }
 
 }
 
-async fn handle_connection(mut stream: TcpStream, file_name: &str){
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).await.unwrap();
-    println!("Connection established");
-    
-    let contents = fs::read_to_string(file_name).unwrap();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-        contents.len(),
-        contents
-    );
-    stream.write(response.as_bytes()).await.unwrap();
-    stream.flush().await.unwrap();
+async fn handle_connection(req: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>> {
+    let url = INDEX.to_string();
+    let path = req.uri().path().to_string();
+    let fn_path = format!("{}{}",url,path);
+    println!("You are currently viewing file: {} {}", url, path);
+    match req.uri().path() {
+        "/" => simple_file_send("./index.html").await,
+        _ => simple_file_send(&fn_path).await
+    }
+}
+fn not_found() -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Full::new(NOTFOUND.into()))
+        .unwrap()
+}
+
+async fn simple_file_send(filename: &str) -> Result<Response<Full<Bytes>>> {
+
+    if let Ok(contents) = tokio::fs::read(filename).await {
+        let body = contents.into();
+        return Ok(Response::new(Full::new(body)));
+    }
+
+    Ok(not_found())
 }
