@@ -7,7 +7,7 @@ use http_body_util::Full;
 use hyper::service::service_fn;
 use hyper::{Request, Response, Result, StatusCode};
 
-// static INDEX: &str = "./";
+static WELCOME: &[u8] = b"Enter the path in url";
 static NOTFOUND: &[u8] = b"Not Found";
 
 #[tokio::main]
@@ -39,10 +39,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut file_name = String::from("index.html");
 
     if let Some(i) = matches.value_of("port"){
-        file_port.replace_range(.., i);
+        file_port = i.to_string();
     }
     if let Some(j) = matches.value_of("file"){
-        file_name.replace_range(.., j);
+        file_name = j.to_string();
     }
 
 
@@ -66,28 +66,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn handle_connection(req: Request<hyper::body::Incoming>, file: String) -> Result<Response<Full<Bytes>>> {
-    let url = &file;
-    let path = req.uri().path().to_string();
-    let fn_path = format!("{}{}",url,path);
-    println!("You are currently viewing file: {} {}", url, path);
+    let url = format!("{}{}",file,req.uri().path());
+    println!("You are currently viewing file: {}", url);
     match req.uri().path() {
-        "/" => simple_file_send("./index.html").await,
-        _ => simple_file_send(&fn_path).await
+        "/" => Ok(Response::builder().status(200).body(Full::new(WELCOME.into())).unwrap()),
+        _ => file_send(url).await
     }
 }
+
+async fn file_send(filename: String) -> Result<Response<Full<Bytes>>> {
+    if let Ok(contents) = tokio::fs::read(filename).await {
+        let body = contents.into();
+        return Ok(Response::new(Full::new(body)));
+    }
+    Ok(not_found())
+}
+
 fn not_found() -> Response<Full<Bytes>> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(Full::new(NOTFOUND.into()))
         .unwrap()
-}
-
-async fn simple_file_send(filename: &str) -> Result<Response<Full<Bytes>>> {
-
-    if let Ok(contents) = tokio::fs::read(filename).await {
-        let body = contents.into();
-        return Ok(Response::new(Full::new(body)));
-    }
-
-    Ok(not_found())
 }
